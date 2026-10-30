@@ -40,8 +40,12 @@ class DataDependentControlFlowModel(models.Model):
 
 
 class RepeatModel(models.Model):
+    def __init__(self, repeats=2, **kwargs):
+        super().__init__(**kwargs)
+        self.repeats = repeats
+
     def call(self, x):
-        return ops.repeat(x, 2, axis=1)
+        return ops.repeat(x, self.repeats, axis=1)
 
 
 class SliceModel(models.Model):
@@ -377,12 +381,23 @@ class ExportTorchTest(testing.TestCase):
 
         self._verify_export_and_inference(model, ref_input)
 
-    def test_export_with_repeat_op(self):
-        model = RepeatModel()
+    @parameterized.named_parameters(
+        ("scalar", 2),
+        ("sequence", (1, 2, 3)),
+        ("one_count", (2,)),
+    )
+    def test_export_with_repeat_op(self, repeats):
+        model = RepeatModel(repeats)
         ref_input = np.random.normal(size=(1, 3)).astype("float32")
         model(ref_input)
 
-        self._verify_export_and_inference(model, ref_input)
+        filepath = os.path.join(self.get_temp_dir(), "model.pt2")
+        self._verify_export_and_inference(model, ref_input, filepath=filepath)
+
+        # The output shape must stay static, without an unbacked symbol.
+        graph = torch.export.load(filepath).graph
+        output = next(node for node in graph.nodes if node.op == "output")
+        self.assertEqual(tuple(output.args[0][0].meta["val"].shape), (1, 6))
 
     def test_export_with_slice_ops(self):
         model = SliceModel()

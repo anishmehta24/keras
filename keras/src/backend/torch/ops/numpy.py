@@ -1970,6 +1970,10 @@ def repeat(x, repeats, axis=None):
             device=get_device(),
         )
 
+    # A single count applies to every element, as a scalar count does.
+    if isinstance(repeats, (list, tuple)) and len(repeats) == 1:
+        repeats = repeats[0]
+
     # When repeats is a scalar int and axis is specified, use
     # unsqueeze + expand + reshape instead of repeat_interleave.
     # repeat_interleave introduces unbacked symbolic integers during
@@ -1987,16 +1991,20 @@ def repeat(x, repeats, axis=None):
         new_shape[axis] = shape[axis] * repeats
         return x.reshape(new_shape)
 
-    # When repeats is a list/tuple of ints, pass it directly to
-    # repeat_interleave without converting to a tensor. The output
-    # size (sum(repeats)) is statically known, so torch.export can
+    # When repeats is a list/tuple of ints, the output size (sum(repeats))
+    # is statically known. Passing it as output_size lets torch.export
     # infer shapes without introducing unbacked symbols.
     if (
         isinstance(repeats, (list, tuple))
-        and all(isinstance(r, int) for r in repeats)
+        and builtins.all(isinstance(r, int) for r in repeats)
         and axis is not None
     ):
-        return torch.repeat_interleave(x, repeats, dim=axis)
+        return torch.repeat_interleave(
+            x,
+            convert_to_tensor(repeats, dtype=int),
+            dim=axis,
+            output_size=builtins.sum(repeats),
+        )
 
     repeats = convert_to_tensor(repeats, dtype=int)
 

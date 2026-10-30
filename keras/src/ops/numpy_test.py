@@ -1,6 +1,7 @@
 import functools
 import itertools
 import math
+import os
 import warnings
 
 import jax.numpy as jnp
@@ -7131,6 +7132,15 @@ class NumpyOneInputOpsCorrectnessTest(testing.TestCase):
             knp.repeat(x, np.array([1, 2]), axis=-1),
             np.repeat(x, np.array([1, 2]), axis=-1),
         )
+        self.assertAllClose(
+            knp.repeat(x, [1, 2], axis=0), np.repeat(x, [1, 2], axis=0)
+        )
+        self.assertAllClose(
+            knp.repeat(x, (2, 1), axis=1), np.repeat(x, (2, 1), axis=1)
+        )
+        self.assertAllClose(
+            knp.repeat(x, [1, 2, 0, 1]), np.repeat(x, [1, 2, 0, 1])
+        )
         self.assertAllClose(knp.Repeat(2)(x), np.repeat(x, 2))
         self.assertAllClose(knp.Repeat(3, axis=1)(x), np.repeat(x, 3, axis=1))
         self.assertAllClose(
@@ -13666,6 +13676,40 @@ class TileTest(testing.TestCase):
 
 
 class RepeatTest(testing.TestCase):
+    @parameterized.named_parameters(
+        ("tuple", (1, 2, 3)),
+        ("list", [1, 2, 3]),
+        ("one_count_tuple", (2,)),
+        ("one_count_list", [2]),
+    )
+    def test_repeat_with_sequence_repeats(self, repeats):
+        x = np.arange(24, dtype="float32").reshape(2, 3, 4)
+        expected = np.repeat(x, repeats, axis=1)
+
+        self.assertAllClose(knp.repeat(x, repeats, axis=1), expected)
+        self.assertAllClose(knp.Repeat(repeats, axis=1)(x), expected)
+        self.assertEqual(
+            knp.repeat(KerasTensor(x.shape), repeats, axis=1).shape,
+            expected.shape,
+        )
+
+    def test_repeat_with_one_count_and_no_axis(self):
+        x = np.arange(6, dtype="float32").reshape(2, 3)
+        self.assertAllClose(knp.repeat(x, (2,)), np.repeat(x, (2,)))
+
+    def test_repeat_with_tuple_repeats_after_reload(self):
+        # A `.keras` save turns the tuple into a list.
+        inputs = keras.Input(shape=(3, 4))
+        model = keras.Model(inputs, knp.repeat(inputs, (1, 2, 3), axis=1))
+        x = np.arange(24, dtype="float32").reshape(2, 3, 4)
+        expected = np.repeat(x, (1, 2, 3), axis=1)
+        self.assertAllClose(model.predict(x), expected)
+
+        path = os.path.join(self.get_temp_dir(), "model.keras")
+        model.save(path)
+        reloaded = keras.saving.load_model(path)
+        self.assertAllClose(reloaded.predict(x), expected)
+
     def test_repeat_with_symbolic_scalar_repeats(self):
         # numpy accepts `repeats` either as one count per element or as a
         # single scalar meaning "repeat every element this many times". Here
